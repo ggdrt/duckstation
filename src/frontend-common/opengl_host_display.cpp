@@ -779,10 +779,12 @@ void OpenGLHostDisplay::RenderDisplay(s32 left, s32 bottom, s32 width, s32 heigh
 
   if (!m_use_gles2_draw_path)
   {
+    const float adjust = linear_filter ? 0.5f : 0.0f;
     m_display_program.Uniform4f(0, static_cast<float>(texture_view_x) / static_cast<float>(texture_width),
                                 static_cast<float>(texture_view_y) / static_cast<float>(texture_height),
-                                (static_cast<float>(texture_view_width) - 0.5f) / static_cast<float>(texture_width),
-                                (static_cast<float>(texture_view_height) + 0.5f) / static_cast<float>(texture_height));
+                                (static_cast<float>(texture_view_width) - adjust) / static_cast<float>(texture_width),
+                                (static_cast<float>(texture_view_height) - adjust) /
+                                  static_cast<float>(texture_height));
     glBindSampler(0, linear_filter ? m_display_linear_sampler : m_display_nearest_sampler);
     glBindVertexArray(m_display_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
