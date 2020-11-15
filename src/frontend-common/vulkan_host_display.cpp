@@ -698,8 +698,8 @@ void VulkanHostDisplay::RenderDisplay()
                 m_display_texture_view_height, m_display_linear_filtering);
 }
 
-void VulkanHostDisplay::RenderDisplay(s32 left, s32 top, s32 width, s32 height, void* texture_handle, u32 texture_width,
-                                      s32 texture_height, s32 texture_view_x, s32 texture_view_y,
+void VulkanHostDisplay::RenderDisplay(float left, float top, float width, float height, void* texture_handle,
+                                      u32 texture_width, s32 texture_height, s32 texture_view_x, s32 texture_view_y,
                                       s32 texture_view_width, s32 texture_view_height, bool linear_filter)
 {
   VkCommandBuffer cmdbuffer = g_vulkan_context->GetCurrentCommandBuffer();
@@ -728,7 +728,14 @@ void VulkanHostDisplay::RenderDisplay(s32 left, s32 top, s32 width, s32 height, 
   vkCmdBindPipeline(cmdbuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_display_pipeline);
   vkCmdPushConstants(cmdbuffer, m_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
   vkCmdBindDescriptorSets(cmdbuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layout, 0, 1, &ds, 0, nullptr);
-  Vulkan::Util::SetViewportAndScissor(cmdbuffer, left, top, width, height);
+
+  const VkViewport vp{left, top, width, height, 0.0f, 1.0f};
+  vkCmdSetViewport(cmdbuffer, 0, 1, &vp);
+
+  const VkRect2D scissor{{static_cast<s32>(left), static_cast<s32>(top)},
+                         {static_cast<u32>(width), static_cast<u32>(height)}};
+  vkCmdSetScissor(cmdbuffer, 0, 1, &scissor);
+
   vkCmdDraw(cmdbuffer, 3, 1, 0, 0);
 }
 
@@ -951,10 +958,10 @@ bool VulkanHostDisplay::CheckPostProcessingRenderTargets(u32 target_width, u32 t
   return true;
 }
 
-void VulkanHostDisplay::ApplyPostProcessingChain(s32 final_left, s32 final_top, s32 final_width, s32 final_height,
-                                                 void* texture_handle, u32 texture_width, s32 texture_height,
-                                                 s32 texture_view_x, s32 texture_view_y, s32 texture_view_width,
-                                                 s32 texture_view_height)
+void VulkanHostDisplay::ApplyPostProcessingChain(float final_left, float final_top, float final_width,
+                                                 float final_height, void* texture_handle, u32 texture_width,
+                                                 s32 texture_height, s32 texture_view_x, s32 texture_view_y,
+                                                 s32 texture_view_width, s32 texture_view_height)
 {
   if (!CheckPostProcessingRenderTargets(m_swap_chain->GetWidth(), m_swap_chain->GetHeight()))
   {
@@ -976,10 +983,6 @@ void VulkanHostDisplay::ApplyPostProcessingChain(s32 final_left, s32 final_top, 
   texture_handle = &m_post_processing_input_texture;
   texture_width = m_post_processing_input_texture.GetWidth();
   texture_height = m_post_processing_input_texture.GetHeight();
-  texture_view_x = final_left;
-  texture_view_y = final_top;
-  texture_view_width = final_width;
-  texture_view_height = final_height;
 
   const u32 final_stage = static_cast<u32>(m_post_processing_stages.size()) - 1u;
   for (u32 i = 0; i < static_cast<u32>(m_post_processing_stages.size()); i++)
@@ -1012,9 +1015,9 @@ void VulkanHostDisplay::ApplyPostProcessingChain(s32 final_left, s32 final_top, 
     {
       u8 buffer[PostProcessingShader::PUSH_CONSTANT_SIZE_THRESHOLD];
       Assert(pps.uniforms_size <= sizeof(buffer));
-      m_post_processing_chain.GetShaderStage(i).FillUniformBuffer(
-        buffer, texture_width, texture_height, texture_view_x, texture_view_y, texture_view_width, texture_view_height,
-        texture_width, texture_width, 0.0f);
+      m_post_processing_chain.GetShaderStage(i).FillUniformBuffer(buffer, texture_width, texture_height, final_left,
+                                                                  final_top, final_width, final_height, texture_width,
+                                                                  texture_height, 0.0f);
 
       vkCmdPushConstants(cmdbuffer, m_post_process_pipeline_layout,
                          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pps.uniforms_size, buffer);
@@ -1033,8 +1036,8 @@ void VulkanHostDisplay::ApplyPostProcessingChain(s32 final_left, s32 final_top, 
 
       const u32 offset = m_post_processing_ubo.GetCurrentOffset();
       m_post_processing_chain.GetShaderStage(i).FillUniformBuffer(
-        m_post_processing_ubo.GetCurrentHostPointer(), texture_width, texture_height, texture_view_x, texture_view_y,
-        texture_view_width, texture_view_height, GetWindowWidth(), GetWindowHeight(), 0.0f);
+        m_post_processing_ubo.GetCurrentHostPointer(), texture_width, texture_height, final_left, final_top,
+        final_width, final_height, GetWindowWidth(), GetWindowHeight(), 0.0f);
       m_post_processing_ubo.CommitMemory(pps.uniforms_size);
 
       dsupdate.AddBufferDescriptorWrite(ds, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,

@@ -81,7 +81,7 @@ protected:
   void RenderImGui();
   void RenderSoftwareCursor();
 
-  void RenderDisplay(s32 left, s32 bottom, s32 width, s32 height, void* texture_handle, u32 texture_width,
+  void RenderDisplay(float left, float bottom, float width, float height, void* texture_handle, u32 texture_width,
                      s32 texture_height, s32 texture_view_x, s32 texture_view_y, s32 texture_view_width,
                      s32 texture_view_height, bool linear_filter);
   void RenderSoftwareCursor(s32 left, s32 bottom, s32 width, s32 height, HostDisplayTexture* texture_handle);
@@ -95,9 +95,10 @@ protected:
   };
 
   bool CheckPostProcessingRenderTargets(u32 target_width, u32 target_height);
-  void ApplyPostProcessingChain(GLuint final_target, s32 final_left, s32 final_top, s32 final_width, s32 final_height,
-                                void* texture_handle, u32 texture_width, s32 texture_height, s32 texture_view_x,
-                                s32 texture_view_y, s32 texture_view_width, s32 texture_view_height);
+  void ApplyPostProcessingChain(GLuint final_target, float final_left, float final_top, float final_width,
+                                float final_height, void* texture_handle, u32 texture_width, s32 texture_height,
+                                s32 texture_view_x, s32 texture_view_y, s32 texture_view_width,
+                                s32 texture_view_height);
 #endif
 
   std::unique_ptr<GL::Context> m_gl_context;

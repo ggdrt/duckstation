@@ -186,8 +186,8 @@ public:
   void ClearSoftwareCursor();
 
   /// Helper function for computing the draw rectangle in a larger window.
-  std::tuple<s32, s32, s32, s32> CalculateDrawRect(s32 window_width, s32 window_height, s32 top_margin,
-                                                   bool apply_aspect_ratio = true) const;
+  std::tuple<float, float, float, float> CalculateDrawRect(s32 window_width, s32 window_height, s32 top_margin,
+                                                           bool apply_aspect_ratio = true) const;
 
   /// Helper function for converting window coordinates to display coordinates.
   std::tuple<float, float> ConvertWindowCoordinatesToDisplayCoordinates(s32 window_x, s32 window_y, s32 window_width,
@@ -211,8 +211,8 @@ protected:
   ALWAYS_INLINE bool HasSoftwareCursor() const { return static_cast<bool>(m_cursor_texture); }
   ALWAYS_INLINE bool HasDisplayTexture() const { return (m_display_texture_handle != nullptr); }
 
-  void CalculateDrawRect(s32 window_width, s32 window_height, s32* out_left, s32* out_top, s32* out_width,
-                         s32* out_height, s32* out_left_padding, s32* out_top_padding, float* out_scale,
+  void CalculateDrawRect(s32 window_width, s32 window_height, float* out_left, float* out_top, float* out_width,
+                         float* out_height, float* out_left_padding, float* out_top_padding, float* out_scale,
                          float* out_x_scale, bool apply_aspect_ratio = true) const;
 
   std::tuple<s32, s32, s32, s32> CalculateSoftwareCursorDrawRect() const;

@@ -796,9 +796,9 @@ void D3D11HostDisplay::RenderDisplay()
                 m_display_texture_view_height, m_display_linear_filtering);
 }
 
-void D3D11HostDisplay::RenderDisplay(s32 left, s32 top, s32 width, s32 height, void* texture_handle, u32 texture_width,
-                                     s32 texture_height, s32 texture_view_x, s32 texture_view_y, s32 texture_view_width,
-                                     s32 texture_view_height, bool linear_filter)
+void D3D11HostDisplay::RenderDisplay(float left, float top, float width, float height, void* texture_handle,
+                                     u32 texture_width, s32 texture_height, s32 texture_view_x, s32 texture_view_y,
+                                     s32 texture_view_width, s32 texture_view_height, bool linear_filter)
 {
   m_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   m_context->VSSetShader(m_display_vertex_shader.Get(), nullptr, 0);
@@ -816,8 +816,7 @@ void D3D11HostDisplay::RenderDisplay(s32 left, s32 top, s32 width, s32 height, v
   m_display_uniform_buffer.Unmap(m_context.Get(), sizeof(uniforms));
   m_context->VSSetConstantBuffers(0, 1, m_display_uniform_buffer.GetD3DBufferArray());
 
-  const CD3D11_VIEWPORT vp(static_cast<float>(left), static_cast<float>(top), static_cast<float>(width),
-                           static_cast<float>(height));
+  const CD3D11_VIEWPORT vp(left, top, width, height);
   m_context->RSSetViewports(1, &vp);
   m_context->RSSetState(m_display_rasterizer_state.Get());
   m_context->OMSetDepthStencilState(m_display_depth_stencil_state.Get(), 0);
@@ -1024,8 +1023,8 @@ bool D3D11HostDisplay::CheckPostProcessingRenderTargets(u32 target_width, u32 ta
   return true;
 }
 
-void D3D11HostDisplay::ApplyPostProcessingChain(ID3D11RenderTargetView* final_target, s32 final_left, s32 final_top,
-                                                s32 final_width, s32 final_height, void* texture_handle,
+void D3D11HostDisplay::ApplyPostProcessingChain(ID3D11RenderTargetView* final_target, float final_left, float final_top,
+                                                float final_width, float final_height, void* texture_handle,
                                                 u32 texture_width, s32 texture_height, s32 texture_view_x,
                                                 s32 texture_view_y, s32 texture_view_width, s32 texture_view_height)
 {
@@ -1047,10 +1046,6 @@ void D3D11HostDisplay::ApplyPostProcessingChain(ID3D11RenderTargetView* final_ta
   texture_handle = m_post_processing_input_texture.GetD3DSRV();
   texture_width = m_post_processing_input_texture.GetWidth();
   texture_height = m_post_processing_input_texture.GetHeight();
-  texture_view_x = final_left;
-  texture_view_y = final_top;
-  texture_view_width = final_width;
-  texture_view_height = final_height;
 
   const u32 final_stage = static_cast<u32>(m_post_processing_stages.size()) - 1u;
   for (u32 i = 0; i < static_cast<u32>(m_post_processing_stages.size()); i++)
@@ -1074,9 +1069,9 @@ void D3D11HostDisplay::ApplyPostProcessingChain(ID3D11RenderTargetView* final_ta
 
     const auto map =
       m_display_uniform_buffer.Map(m_context.Get(), m_display_uniform_buffer.GetSize(), pps.uniforms_size);
-    m_post_processing_chain.GetShaderStage(i).FillUniformBuffer(
-      map.pointer, texture_width, texture_height, texture_view_x, texture_view_y, texture_view_width,
-      texture_view_height, GetWindowWidth(), GetWindowHeight(), 0.0f);
+    m_post_processing_chain.GetShaderStage(i).FillUniformBuffer(map.pointer, texture_width, texture_height, final_left,
+                                                                final_top, final_width, final_height, GetWindowWidth(),
+                                                                GetWindowHeight(), 0.0f);
     m_display_uniform_buffer.Unmap(m_context.Get(), pps.uniforms_size);
     m_context->VSSetConstantBuffers(0, 1, m_display_uniform_buffer.GetD3DBufferArray());
     m_context->PSSetConstantBuffers(0, 1, m_display_uniform_buffer.GetD3DBufferArray());

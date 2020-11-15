@@ -80,9 +80,9 @@ public:
 
   bool UsePushConstants() const;
   u32 GetUniformsSize() const;
-  void FillUniformBuffer(void* buffer, u32 texture_width, s32 texture_height, s32 texture_view_x, s32 texture_view_y,
-                         s32 texture_view_width, s32 texture_view_height, u32 window_width, u32 window_height,
-                         float time) const;
+  void FillUniformBuffer(void* buffer, u32 texture_width, s32 texture_height, float texture_view_x,
+                         float texture_view_y, float texture_view_width, float texture_view_height, u32 window_width,
+                         u32 window_height, float time) const;
 
 private:
   struct CommonUniforms

@@ -241,8 +241,8 @@ u32 PostProcessingShader::GetUniformsSize() const
   return sizeof(CommonUniforms) + (sizeof(Option::ValueVector) * static_cast<u32>(m_options.size()));
 }
 
-void PostProcessingShader::FillUniformBuffer(void* buffer, u32 texture_width, s32 texture_height, s32 texture_view_x,
-                                             s32 texture_view_y, s32 texture_view_width, s32 texture_view_height,
+void PostProcessingShader::FillUniformBuffer(void* buffer, u32 texture_width, s32 texture_height, float texture_view_x,
+                                             float texture_view_y, float texture_view_width, float texture_view_height,
                                              u32 window_width, u32 window_height, float time) const
 {
   CommonUniforms* common = static_cast<CommonUniforms*>(buffer);
@@ -250,12 +250,12 @@ void PostProcessingShader::FillUniformBuffer(void* buffer, u32 texture_width, s3
   // TODO: OpenGL?
   const float rcp_texture_width = 1.0f / static_cast<float>(texture_width);
   const float rcp_texture_height = 1.0f / static_cast<float>(texture_height);
-  common->src_rect[0] = static_cast<float>(texture_view_x) * rcp_texture_width;
-  common->src_rect[1] = static_cast<float>(texture_view_y) * rcp_texture_height;
-  common->src_rect[2] = (static_cast<float>(texture_view_x + texture_view_width - 1)) * rcp_texture_width;
-  common->src_rect[3] = (static_cast<float>(texture_view_y + texture_view_height - 1)) * rcp_texture_height;
-  common->src_size[0] = (static_cast<float>(texture_view_width)) * rcp_texture_width;
-  common->src_size[1] = (static_cast<float>(texture_view_height)) * rcp_texture_height;
+  common->src_rect[0] = texture_view_x * rcp_texture_width;
+  common->src_rect[1] = texture_view_y * rcp_texture_height;
+  common->src_rect[2] = (texture_view_x + texture_view_width - 1.0f) * rcp_texture_width;
+  common->src_rect[3] = (texture_view_y + texture_view_height - 1.0f) * rcp_texture_height;
+  common->src_size[0] = texture_view_width * rcp_texture_width;
+  common->src_size[1] = texture_view_height * rcp_texture_height;
   common->resolution[0] = static_cast<float>(texture_width);
   common->resolution[1] = static_cast<float>(texture_height);
   common->rcp_resolution[0] = rcp_texture_width;
