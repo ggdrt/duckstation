@@ -99,6 +99,12 @@ private:
     GetAnalogMode5,
     GetAnalogMode6,
     UnlockRumbleIDMSB,
+    GetSetRumble1,
+    GetSetRumble2,
+    GetSetRumble3,
+    GetSetRumble4,
+    GetSetRumble5,
+    GetSetRumble6,
     Command46IDMSB,
     Command461,
     Command462,
@@ -148,6 +154,14 @@ private:
   u8 m_command_param = 0;
 
   std::array<u8, static_cast<u8>(Axis::Count)> m_axis_state{};
+
+  std::array<u8, 6> m_rumble_setting{};
+
+  bool m_analog_toggle_queued = false;
+
+  u8 m_command4C_response = 0x00;
+
+  bool m_config_command_used = false;
 
   // buttons are active low
   u16 m_button_state = UINT16_C(0xFFFF);

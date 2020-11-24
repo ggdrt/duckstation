@@ -10,6 +10,7 @@ Log_SetChannel(AnalogController);
 AnalogController::AnalogController(u32 index) : m_index(index)
 {
   m_axis_state.fill(0x80);
+  m_rumble_setting.fill(0xFF);
   Reset();
 }
 
@@ -100,24 +101,8 @@ void AnalogController::SetButtonState(Button button, bool pressed)
 {
   if (button == Button::Analog)
   {
-    // analog toggle
     if (pressed)
-    {
-      if (m_analog_locked)
-      {
-        g_host_interface->AddFormattedOSDMessage(
-          5.0f,
-          m_analog_mode ? g_host_interface->TranslateString("AnalogController",
-                                                            "Controller %u is locked to analog mode by the game.") :
-                          g_host_interface->TranslateString("AnalogController",
-                                                            "Controller %u is locked to digital mode by the game."),
-          m_index + 1u);
-      }
-      else
-      {
-        SetAnalogMode(!m_analog_mode);
-      }
-    }
+      m_analog_toggle_queued = true;
 
     return;
   }
@@ -158,6 +143,27 @@ float AnalogController::GetVibrationMotorStrength(u32 motor)
 
 void AnalogController::ResetTransferState()
 {
+  // Log_InfoPrintf("Transfer state reset");
+
+  if (m_analog_toggle_queued)
+  {
+    if (m_analog_locked)
+    {
+      g_host_interface->AddFormattedOSDMessage(
+        5.0f,
+        m_analog_mode ?
+          g_host_interface->TranslateString("AnalogController", "Controller %u is locked to analog mode by the game.") :
+          g_host_interface->TranslateString("AnalogController", "Controller %u is locked to digital mode by the game."),
+        m_index + 1u);
+    }
+    else
+    {
+      SetAnalogMode(!m_analog_mode);
+    }
+
+    m_analog_toggle_queued = false;
+  }
+
   m_state = State::Idle;
 }
 
@@ -178,7 +184,7 @@ void AnalogController::SetAnalogMode(bool enabled)
   if (m_analog_mode == enabled)
     return;
 
-  Log_InfoPrintf("Controller %u switched to %s mode.", m_index + 1u, enabled ? "analog" : "digital");
+  Log_WarningPrintf("Controller %u switched to %s mode.", m_index + 1u, enabled ? "analog" : "digital");
   g_host_interface->AddFormattedOSDMessage(
     5.0f,
     enabled ? g_host_interface->TranslateString("AnalogController", "Controller %u switched to analog mode.") :
@@ -239,53 +245,88 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
   }                                                                                                                    \
   break;
 
+#define REPLY_RUMBLE_SETTING(state, pos, ack_value, next_state)                                                        \
+  case state:                                                                                                          \
+  {                                                                                                                    \
+    DebugAssert(pos < m_rumble_setting.size());                                                                        \
+    *data_out = m_rumble_setting[pos];                                                                                 \
+    m_rumble_setting[pos] = data_in;                                                                                   \
+    m_state = next_state;                                                                                              \
+    ack = ack_value;                                                                                                   \
+    Log_InfoPrintf("Output 0x%02X, Input 0x%02X", *data_out, m_rumble_setting[pos]);                                   \
+  }                                                                                                                    \
+  break;
+
     case State::Idle:
     {
       // ack when sent 0x01, send ID for 0x42
       if (data_in == 0x42)
       {
+        if (m_configuration_mode)
+        {
+          Log_InfoPrintf("Pad read while in config mode");
+          m_config_command_used = true;
+        }
+
         *data_out = Truncate8(GetID());
         m_state = State::GetStateIDMSB;
         ack = true;
       }
       else if (data_in == 0x43)
       {
+        if (m_configuration_mode)
+          m_config_command_used = true;
+
         *data_out = Truncate8(GetID());
         m_state = State::ConfigModeIDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x44)
       {
+        m_config_command_used = true;
+        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::SetAnalogModeIDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x45)
       {
+        m_config_command_used = true;
+        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::GetAnalogModeIDMSB;
         ack = true;
+        Log_InfoPrintf("Get analog mode, %u", BoolToUInt8(m_analog_mode));
       }
       else if (m_configuration_mode && data_in == 0x46)
       {
+        m_config_command_used = true;
+        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::Command46IDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x47)
       {
+        m_config_command_used = true;
+        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::Command47IDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x4C)
       {
+        m_config_command_used = true;
+        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::Command4CIDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x4D)
       {
+        m_config_command_used = true;
+        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
+        Log_InfoPrintf("Unlocking rumble");
         m_rumble_unlocked = true;
         *data_out = Truncate8(GetID());
         m_state = State::UnlockRumbleIDMSB;
@@ -296,6 +337,8 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
         Log_DebugPrintf("data_in = 0x%02X", data_in);
         *data_out = 0xFF;
         ack = (data_in == 0x01);
+        if (!ack)
+          Log_WarningPrintf("Unknown data_in = 0x%02X", data_in);
       }
     }
     break;
@@ -305,7 +348,11 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
     case State::GetStateButtonsLSB:
     {
       if (m_rumble_unlocked)
-        SetMotorState(1, ((data_in & 0x01) != 0) ? 255 : 0);
+      {
+        if (m_rumble_setting[0] == 0x00 && m_rumble_setting[2] != 0x00 && m_rumble_setting[3] != 0x00 &&
+            m_rumble_setting[4] != 0x00 && m_rumble_setting[5] != 0x00)
+          SetMotorState(1, ((data_in & 0x01) != 0) ? 255 : 0);
+      }
       else if (data_in >= 0x40 && data_in <= 0x7F)
         m_legacy_rumble_unlocked = true;
       else
@@ -320,7 +367,13 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
     case State::GetStateButtonsMSB:
     {
       if (m_rumble_unlocked)
-        SetMotorState(0, data_in);
+      {
+        if (m_rumble_setting[1] == 0x00 && m_rumble_setting[2] != 0x00 && m_rumble_setting[3] != 0x00 &&
+            m_rumble_setting[4] != 0x00 && m_rumble_setting[5] != 0x00)
+          SetMotorState(1, ((data_in & 0x01) != 0) ? 255 : 0);
+        else
+          SetMotorState(0, data_in);
+      }
       else if (m_legacy_rumble_unlocked)
       {
         SetMotorState(1, ((data_in & 0x01) != 0) ? 255 : 0);
@@ -328,8 +381,8 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
       }
 
       *data_out = Truncate8(m_button_state >> 8);
-      m_state = m_analog_mode ? State::GetStateRightAxisX : State::Idle;
-      ack = m_analog_mode;
+      m_state = (m_analog_mode || m_configuration_mode) ? State::GetStateRightAxisX : State::Idle;
+      ack = m_analog_mode || m_configuration_mode;
     }
     break;
 
@@ -342,14 +395,21 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
       FIXED_REPLY_STATE(State::GetStateLeftAxisY, Truncate8(m_axis_state[static_cast<u8>(Axis::LeftY)]), false,
                         State::Idle);
 
-      ID_STATE_MSB(State::ConfigModeIDMSB, State::ConfigModeSetMode);
+    case State::ConfigModeIDMSB:
+    {
+      *data_out = (m_analog_mode && !m_configuration_mode && m_config_command_used) ? 0x00 : Truncate8(GetID() >> 8);
+      m_state = State::ConfigModeSetMode;
+      ack = true;
+    }
+    break;
 
     case State::ConfigModeSetMode:
     {
-      Log_DebugPrintf("0x%02x(%s) config mode", data_in, data_in == 1 ? "enter" : "leave");
+      Log_InfoPrintf("0x%02x(%s) config mode", data_in, data_in == 1 ? "enter" : "leave");
+      bool prev_configuration_mode = m_configuration_mode;
       m_configuration_mode = (data_in == 1);
-      *data_out = Truncate8(m_button_state);
-      m_state = State::GetStateButtonsMSB;
+      *data_out = prev_configuration_mode ? 0x00 : Truncate8(m_button_state);
+      m_state = prev_configuration_mode ? State::Pad5Bytes : State::GetStateButtonsMSB;
       ack = true;
     }
     break;
@@ -358,7 +418,7 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
     case State::SetAnalogModeVal:
     {
-      Log_DevPrintf("analog mode val 0x%02x", data_in);
+      Log_InfoPrintf("analog mode val 0x%02x", data_in);
       if (data_in == 0x00 || data_in == 0x01)
         SetAnalogMode((data_in == 0x01));
 
@@ -370,7 +430,7 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
     case State::SetAnalogModeSel:
     {
-      Log_DevPrintf("analog mode lock 0x%02x", data_in);
+      Log_InfoPrintf("analog mode lock 0x%02x", data_in);
       if (data_in == 0x02 || data_in == 0x03)
         m_analog_locked = (data_in == 0x03);
 
@@ -392,7 +452,7 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
     case State::Command461:
     {
-      Log_DebugPrintf("command 46 param 0x%02X", data_in);
+      Log_InfoPrintf("command 46 param 0x%02X", data_in);
       m_command_param = data_in;
       *data_out = 0x00;
       m_state = State::Command462;
@@ -420,6 +480,15 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
     {
       // SetAnalogMode(data_in != 0x00);
       // Log_WarningPrintf("analog mode %s by 0x4c", m_analog_mode ? "enabled" : "disabled");
+      if (data_in == 0x00)
+        m_command4C_response = 0x04;
+      else if (data_in == 0x01)
+        m_command4C_response = 0x07;
+      else
+        m_command4C_response = 0x00;
+
+      Log_WarningPrintf("Command 4C special byte 0x%02X", data_in);
+
       *data_out = 0x00;
       m_state = State::Command4C1;
       ack = true;
@@ -428,11 +497,17 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
       FIXED_REPLY_STATE(State::Command4C1, 0x00, true, State::Command4C2);
       FIXED_REPLY_STATE(State::Command4C2, 0x00, true, State::Command4C3);
-      FIXED_REPLY_STATE(State::Command4C3, m_analog_mode ? 0x07 : 0x04, true, State::Command4C4);
+      FIXED_REPLY_STATE(State::Command4C3, m_command4C_response, true, State::Command4C4);
       FIXED_REPLY_STATE(State::Command4C4, 0x00, true, State::Command4C5);
       FIXED_REPLY_STATE(State::Command4C5, 0x00, false, State::Idle);
 
-      ID_STATE_MSB(State::UnlockRumbleIDMSB, State::Pad6Bytes);
+      ID_STATE_MSB(State::UnlockRumbleIDMSB, State::GetSetRumble1);
+      REPLY_RUMBLE_SETTING(State::GetSetRumble1, 0, true, State::GetSetRumble2);
+      REPLY_RUMBLE_SETTING(State::GetSetRumble2, 1, true, State::GetSetRumble3);
+      REPLY_RUMBLE_SETTING(State::GetSetRumble3, 2, true, State::GetSetRumble4);
+      REPLY_RUMBLE_SETTING(State::GetSetRumble4, 3, true, State::GetSetRumble5);
+      REPLY_RUMBLE_SETTING(State::GetSetRumble5, 4, true, State::GetSetRumble6);
+      REPLY_RUMBLE_SETTING(State::GetSetRumble6, 5, false, State::Idle);
 
       FIXED_REPLY_STATE(State::Pad6Bytes, 0x00, true, State::Pad5Bytes);
       FIXED_REPLY_STATE(State::Pad5Bytes, 0x00, true, State::Pad4Bytes);
