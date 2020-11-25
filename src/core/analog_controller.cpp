@@ -10,7 +10,6 @@ Log_SetChannel(AnalogController);
 AnalogController::AnalogController(u32 index) : m_index(index)
 {
   m_axis_state.fill(0x80);
-  m_rumble_setting.fill(0xFF);
   Reset();
 }
 
@@ -24,11 +23,11 @@ ControllerType AnalogController::GetType() const
 void AnalogController::Reset()
 {
   m_analog_mode = false;
-  m_rumble_unlocked = false;
-  m_legacy_rumble_unlocked = false;
   m_configuration_mode = false;
   m_command_param = 0;
   m_motor_state.fill(0);
+
+  ResetRumbleConfig();
 
   if (m_auto_enable_analog)
     SetAnalogMode(true);
@@ -143,8 +142,6 @@ float AnalogController::GetVibrationMotorStrength(u32 motor)
 
 void AnalogController::ResetTransferState()
 {
-  // Log_InfoPrintf("Transfer state reset");
-
   if (m_analog_toggle_queued)
   {
     if (m_analog_locked)
@@ -159,6 +156,11 @@ void AnalogController::ResetTransferState()
     else
     {
       SetAnalogMode(!m_analog_mode);
+
+      // Manually toggling controller mode resets and disables rumble configuration
+      ResetRumbleConfig();
+
+      // TODO: Mode switch detection (0x00 returned on certain commands instead of 0x5A)
     }
 
     m_analog_toggle_queued = false;
@@ -184,7 +186,7 @@ void AnalogController::SetAnalogMode(bool enabled)
   if (m_analog_mode == enabled)
     return;
 
-  Log_WarningPrintf("Controller %u switched to %s mode.", m_index + 1u, enabled ? "analog" : "digital");
+  Log_InfoPrintf("Controller %u switched to %s mode.", m_index + 1u, enabled ? "analog" : "digital");
   g_host_interface->AddFormattedOSDMessage(
     5.0f,
     enabled ? g_host_interface->TranslateString("AnalogController", "Controller %u switched to analog mode.") :
@@ -218,6 +220,28 @@ u8 AnalogController::GetExtraButtonMaskLSB() const
            (static_cast<u8>(down) << static_cast<u8>(Button::Down)));
 }
 
+void AnalogController::ResetRumbleConfig()
+{
+  m_legacy_rumble_unlocked = false;
+
+  m_rumble_unlocked = false;
+  m_rumble_config.fill(0xFF);
+
+  m_rumble_config_large_motor_index = -1;
+  m_rumble_config_small_motor_index = -1;
+
+  SetMotorState(LargeMotor, 0);
+  SetMotorState(SmallMotor, 0);
+}
+
+void AnalogController::SetMotorStateForConfigIndex(int index, u8 value)
+{
+  if (m_rumble_config_small_motor_index == index)
+    SetMotorState(SmallMotor, ((value & 0x01) != 0) ? 255 : 0);
+  else if (m_rumble_config_large_motor_index == index)
+    SetMotorState(LargeMotor, value);
+}
+
 bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 {
   bool ack;
@@ -245,15 +269,20 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
   }                                                                                                                    \
   break;
 
-#define REPLY_RUMBLE_SETTING(state, pos, ack_value, next_state)                                                        \
+#define REPLY_RUMBLE_CONFIG(state, index, ack_value, next_state)                                                       \
   case state:                                                                                                          \
   {                                                                                                                    \
-    DebugAssert(pos < m_rumble_setting.size());                                                                        \
-    *data_out = m_rumble_setting[pos];                                                                                 \
-    m_rumble_setting[pos] = data_in;                                                                                   \
+    DebugAssert(index < m_rumble_config.size());                                                                       \
+    *data_out = m_rumble_config[index];                                                                                \
+    m_rumble_config[index] = data_in;                                                                                  \
+                                                                                                                       \
+    if (data_in == 0x00)                                                                                               \
+      m_rumble_config_small_motor_index = index;                                                                       \
+    else if (data_in == 0x01)                                                                                          \
+      m_rumble_config_large_motor_index = index;                                                                       \
+                                                                                                                       \
     m_state = next_state;                                                                                              \
     ack = ack_value;                                                                                                   \
-    Log_InfoPrintf("Output 0x%02X, Input 0x%02X", *data_out, m_rumble_setting[pos]);                                   \
   }                                                                                                                    \
   break;
 
@@ -262,72 +291,51 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
       // ack when sent 0x01, send ID for 0x42
       if (data_in == 0x42)
       {
-        if (m_configuration_mode)
-        {
-          Log_InfoPrintf("Pad read while in config mode");
-          m_config_command_used = true;
-        }
-
         *data_out = Truncate8(GetID());
         m_state = State::GetStateIDMSB;
         ack = true;
       }
       else if (data_in == 0x43)
       {
-        if (m_configuration_mode)
-          m_config_command_used = true;
-
         *data_out = Truncate8(GetID());
         m_state = State::ConfigModeIDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x44)
       {
-        m_config_command_used = true;
-        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::SetAnalogModeIDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x45)
       {
-        m_config_command_used = true;
-        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::GetAnalogModeIDMSB;
         ack = true;
-        Log_InfoPrintf("Get analog mode, %u", BoolToUInt8(m_analog_mode));
       }
       else if (m_configuration_mode && data_in == 0x46)
       {
-        m_config_command_used = true;
-        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::Command46IDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x47)
       {
-        m_config_command_used = true;
-        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::Command47IDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x4C)
       {
-        m_config_command_used = true;
-        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
         *data_out = Truncate8(GetID());
         m_state = State::Command4CIDMSB;
         ack = true;
       }
       else if (m_configuration_mode && data_in == 0x4D)
       {
-        m_config_command_used = true;
-        Log_InfoPrintf("Command 0x%02X while in configuration mode", data_in);
-        Log_InfoPrintf("Unlocking rumble");
         m_rumble_unlocked = true;
+        SetMotorState(LargeMotor, 0);
+        SetMotorState(SmallMotor, 0);
         *data_out = Truncate8(GetID());
         m_state = State::UnlockRumbleIDMSB;
         ack = true;
@@ -337,8 +345,6 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
         Log_DebugPrintf("data_in = 0x%02X", data_in);
         *data_out = 0xFF;
         ack = (data_in == 0x01);
-        if (!ack)
-          Log_WarningPrintf("Unknown data_in = 0x%02X", data_in);
       }
     }
     break;
@@ -348,15 +354,11 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
     case State::GetStateButtonsLSB:
     {
       if (m_rumble_unlocked)
-      {
-        if (m_rumble_setting[0] == 0x00 && m_rumble_setting[2] != 0x00 && m_rumble_setting[3] != 0x00 &&
-            m_rumble_setting[4] != 0x00 && m_rumble_setting[5] != 0x00)
-          SetMotorState(1, ((data_in & 0x01) != 0) ? 255 : 0);
-      }
+        SetMotorStateForConfigIndex(0, data_in);
       else if (data_in >= 0x40 && data_in <= 0x7F)
         m_legacy_rumble_unlocked = true;
       else
-        SetMotorState(1, 0);
+        SetMotorState(SmallMotor, 0);
 
       *data_out = Truncate8(m_button_state) & GetExtraButtonMaskLSB();
       m_state = State::GetStateButtonsMSB;
@@ -368,15 +370,11 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
     {
       if (m_rumble_unlocked)
       {
-        if (m_rumble_setting[1] == 0x00 && m_rumble_setting[2] != 0x00 && m_rumble_setting[3] != 0x00 &&
-            m_rumble_setting[4] != 0x00 && m_rumble_setting[5] != 0x00)
-          SetMotorState(1, ((data_in & 0x01) != 0) ? 255 : 0);
-        else
-          SetMotorState(0, data_in);
+        SetMotorStateForConfigIndex(1, data_in);
       }
       else if (m_legacy_rumble_unlocked)
       {
-        SetMotorState(1, ((data_in & 0x01) != 0) ? 255 : 0);
+        SetMotorState(SmallMotor, ((data_in & 0x01) != 0) ? 255 : 0);
         m_legacy_rumble_unlocked = false;
       }
 
@@ -386,26 +384,56 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
     }
     break;
 
-      FIXED_REPLY_STATE(State::GetStateRightAxisX, Truncate8(m_axis_state[static_cast<u8>(Axis::RightX)]), true,
-                        State::GetStateRightAxisY);
-      FIXED_REPLY_STATE(State::GetStateRightAxisY, Truncate8(m_axis_state[static_cast<u8>(Axis::RightY)]), true,
-                        State::GetStateLeftAxisX);
-      FIXED_REPLY_STATE(State::GetStateLeftAxisX, Truncate8(m_axis_state[static_cast<u8>(Axis::LeftX)]), true,
-                        State::GetStateLeftAxisY);
-      FIXED_REPLY_STATE(State::GetStateLeftAxisY, Truncate8(m_axis_state[static_cast<u8>(Axis::LeftY)]), false,
-                        State::Idle);
-
-    case State::ConfigModeIDMSB:
+    case State::GetStateRightAxisX:
     {
-      *data_out = (m_analog_mode && !m_configuration_mode && m_config_command_used) ? 0x00 : Truncate8(GetID() >> 8);
-      m_state = State::ConfigModeSetMode;
+      if (m_rumble_unlocked)
+        SetMotorStateForConfigIndex(2, data_in);
+
+      *data_out = Truncate8(m_axis_state[static_cast<u8>(Axis::RightX)]);
+      m_state = State::GetStateRightAxisY;
       ack = true;
     }
     break;
 
+    case State::GetStateRightAxisY:
+    {
+      if (m_rumble_unlocked)
+        SetMotorStateForConfigIndex(3, data_in);
+
+      *data_out = Truncate8(m_axis_state[static_cast<u8>(Axis::RightY)]);
+      m_state = State::GetStateLeftAxisX;
+      ack = true;
+    }
+    break;
+
+    case State::GetStateLeftAxisX:
+    {
+      if (m_rumble_unlocked)
+        SetMotorStateForConfigIndex(4, data_in);
+
+      *data_out = Truncate8(m_axis_state[static_cast<u8>(Axis::LeftX)]);
+      m_state = State::GetStateLeftAxisY;
+      ack = true;
+    }
+    break;
+
+    case State::GetStateLeftAxisY:
+    {
+      if (m_rumble_unlocked)
+        SetMotorStateForConfigIndex(5, data_in);
+
+      *data_out = Truncate8(m_axis_state[static_cast<u8>(Axis::LeftY)]);
+      m_state = State::Idle;
+      ack = false;
+    }
+    break;
+
+      ID_STATE_MSB(State::ConfigModeIDMSB, State::ConfigModeSetMode);
+
     case State::ConfigModeSetMode:
     {
-      Log_InfoPrintf("0x%02x(%s) config mode", data_in, data_in == 1 ? "enter" : "leave");
+      // If 0x43 "enter/leave config mode" is called from within config mode, return all zeros
+      Log_DebugPrintf("0x%02x(%s) config mode", data_in, data_in == 1 ? "enter" : "leave");
       bool prev_configuration_mode = m_configuration_mode;
       m_configuration_mode = (data_in == 1);
       *data_out = prev_configuration_mode ? 0x00 : Truncate8(m_button_state);
@@ -418,7 +446,7 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
     case State::SetAnalogModeVal:
     {
-      Log_InfoPrintf("analog mode val 0x%02x", data_in);
+      Log_DevPrintf("analog mode val 0x%02x", data_in);
       if (data_in == 0x00 || data_in == 0x01)
         SetAnalogMode((data_in == 0x01));
 
@@ -430,7 +458,7 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
     case State::SetAnalogModeSel:
     {
-      Log_InfoPrintf("analog mode lock 0x%02x", data_in);
+      Log_DevPrintf("analog mode lock 0x%02x", data_in);
       if (data_in == 0x02 || data_in == 0x03)
         m_analog_locked = (data_in == 0x03);
 
@@ -452,7 +480,7 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
     case State::Command461:
     {
-      Log_InfoPrintf("command 46 param 0x%02X", data_in);
+      Log_DebugPrintf("command 46 param 0x%02X", data_in);
       m_command_param = data_in;
       *data_out = 0x00;
       m_state = State::Command462;
@@ -480,15 +508,6 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
     {
       // SetAnalogMode(data_in != 0x00);
       // Log_WarningPrintf("analog mode %s by 0x4c", m_analog_mode ? "enabled" : "disabled");
-      if (data_in == 0x00)
-        m_command4C_response = 0x04;
-      else if (data_in == 0x01)
-        m_command4C_response = 0x07;
-      else
-        m_command4C_response = 0x00;
-
-      Log_WarningPrintf("Command 4C special byte 0x%02X", data_in);
-
       *data_out = 0x00;
       m_state = State::Command4C1;
       ack = true;
@@ -497,17 +516,17 @@ bool AnalogController::Transfer(const u8 data_in, u8* data_out)
 
       FIXED_REPLY_STATE(State::Command4C1, 0x00, true, State::Command4C2);
       FIXED_REPLY_STATE(State::Command4C2, 0x00, true, State::Command4C3);
-      FIXED_REPLY_STATE(State::Command4C3, m_command4C_response, true, State::Command4C4);
+      FIXED_REPLY_STATE(State::Command4C3, m_analog_mode ? 0x07 : 0x04, true, State::Command4C4);
       FIXED_REPLY_STATE(State::Command4C4, 0x00, true, State::Command4C5);
       FIXED_REPLY_STATE(State::Command4C5, 0x00, false, State::Idle);
 
       ID_STATE_MSB(State::UnlockRumbleIDMSB, State::GetSetRumble1);
-      REPLY_RUMBLE_SETTING(State::GetSetRumble1, 0, true, State::GetSetRumble2);
-      REPLY_RUMBLE_SETTING(State::GetSetRumble2, 1, true, State::GetSetRumble3);
-      REPLY_RUMBLE_SETTING(State::GetSetRumble3, 2, true, State::GetSetRumble4);
-      REPLY_RUMBLE_SETTING(State::GetSetRumble4, 3, true, State::GetSetRumble5);
-      REPLY_RUMBLE_SETTING(State::GetSetRumble5, 4, true, State::GetSetRumble6);
-      REPLY_RUMBLE_SETTING(State::GetSetRumble6, 5, false, State::Idle);
+      REPLY_RUMBLE_CONFIG(State::GetSetRumble1, 0, true, State::GetSetRumble2);
+      REPLY_RUMBLE_CONFIG(State::GetSetRumble2, 1, true, State::GetSetRumble3);
+      REPLY_RUMBLE_CONFIG(State::GetSetRumble3, 2, true, State::GetSetRumble4);
+      REPLY_RUMBLE_CONFIG(State::GetSetRumble4, 3, true, State::GetSetRumble5);
+      REPLY_RUMBLE_CONFIG(State::GetSetRumble5, 4, true, State::GetSetRumble6);
+      REPLY_RUMBLE_CONFIG(State::GetSetRumble6, 5, false, State::Idle);
 
       FIXED_REPLY_STATE(State::Pad6Bytes, 0x00, true, State::Pad5Bytes);
       FIXED_REPLY_STATE(State::Pad5Bytes, 0x00, true, State::Pad4Bytes);
