@@ -423,20 +423,33 @@ void GPU::SynchronizeCRTC()
 float GPU::ComputeHorizontalFrequency() const
 {
   const CRTCState& cs = m_crtc_state;
+
+  double ticks_per_line = static_cast<double>(cs.horizontal_total);
+  if (!m_GPUSTAT.pal_mode)
+    ticks_per_line -= 0.5;
+
   TickCount fractional_ticks = 0;
   return static_cast<float>(
-    static_cast<double>(SystemTicksToCRTCTicks(System::GetTicksPerSecond(), &fractional_ticks)) /
-    static_cast<double>(cs.horizontal_total));
+    static_cast<double>(SystemTicksToCRTCTicks(System::GetTicksPerSecond(), &fractional_ticks)) / ticks_per_line);
 }
 
 float GPU::ComputeVerticalFrequency() const
 {
   const CRTCState& cs = m_crtc_state;
-  const TickCount ticks_per_frame = cs.horizontal_total * cs.vertical_total;
+
+  double lines_per_field = static_cast<double>(cs.vertical_total);
+  if (m_GPUSTAT.vertical_interlace)
+    lines_per_field -= 0.5;
+
+  double ticks_per_line = cs.horizontal_total;
+  if (!m_GPUSTAT.pal_mode)
+    ticks_per_line -= 0.5;
+
+  const double gpu_ticks_per_field = lines_per_field * ticks_per_line;
+
   TickCount fractional_ticks = 0;
   return static_cast<float>(
-    static_cast<double>(SystemTicksToCRTCTicks(System::GetTicksPerSecond(), &fractional_ticks)) /
-    static_cast<double>(ticks_per_frame));
+    static_cast<double>(SystemTicksToCRTCTicks(System::GetTicksPerSecond(), &fractional_ticks)) / gpu_ticks_per_field);
 }
 
 float GPU::GetDisplayAspectRatio() const
