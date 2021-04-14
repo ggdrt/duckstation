@@ -109,9 +109,6 @@ private:
   u8 GetModeID() const;
   u8 GetIDByte() const;
 
-  // TODO: Return 0x00 on manual toggles
-  constexpr u8 GetStatusByte() const { return 0x5A; };
-
   void SetAnalogMode(bool enabled);
   void ProcessAnalogModeToggle();
   void SetMotorState(u8 motor, u8 value);
@@ -144,6 +141,7 @@ private:
   int m_rumble_config_small_motor_index = -1;
 
   bool m_analog_toggle_queued = false;
+  u8 m_status_byte = 0x5A;
 
   // TODO: Set this with command 0x4D and increase response length in digital mode accordingly
   u8 m_digital_mode_extra_halfwords = 0;
@@ -154,6 +152,5 @@ private:
   MotorState m_motor_state{};
 
   // Member variables that are no longer used, but kept and serialized for compatibility with older save states
-  u8 m_command_param = 0;
   bool m_legacy_rumble_unlocked = false;
 };
